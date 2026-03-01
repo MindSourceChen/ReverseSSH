@@ -89,6 +89,16 @@ else {
     Write-Host "  Firewall rule already exists."
 }
 
+# Set default shell to PowerShell for SSH connections (e.g. iPhone Terminus)
+$currentShell = (Get-ItemProperty -Path "HKLM:\SOFTWARE\OpenSSH" -Name DefaultShell -ErrorAction SilentlyContinue).DefaultShell
+if ($currentShell -ne "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe") {
+    New-ItemProperty -Path "HKLM:\SOFTWARE\OpenSSH" -Name DefaultShell -Value "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe" -PropertyType String -Force | Out-Null
+    Write-Host "  Default SSH shell set to PowerShell." -ForegroundColor Green
+}
+else {
+    Write-Host "  Default SSH shell already set to PowerShell."
+}
+
 # ---------- 3. Generate SSH key pair ----------
 Write-Host ""
 Write-Host "[3/6] Generating SSH key pair..." -ForegroundColor Yellow
