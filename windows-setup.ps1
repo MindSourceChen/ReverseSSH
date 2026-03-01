@@ -110,12 +110,13 @@ else {
 # ---------- 4. Upload public key to VPS ----------
 Write-Host ""
 Write-Host "[4/6] Uploading public key to VPS..." -ForegroundColor Yellow
-Write-Host ("  Enter password for " + $VPS_USER + ":") -ForegroundColor White
+Write-Host "  Enter password for root:" -ForegroundColor White
 
 $pubKeyContent = Get-Content ($keyPath + ".pub")
-$sshTarget = $VPS_USER + '@' + $VPS_IP
-$sshCmd = "mkdir -p ~/.ssh; grep -qF '" + $pubKeyContent + "' ~/.ssh/authorized_keys 2>/dev/null || echo '" + $pubKeyContent + "' >> ~/.ssh/authorized_keys; chmod 600 ~/.ssh/authorized_keys"
-ssh -p $VPS_SSH_PORT $sshTarget $sshCmd
+$uploadTarget = 'root@' + $VPS_IP
+$tunnelHome = '/home/' + $VPS_USER
+$sshCmd = "mkdir -p " + $tunnelHome + "/.ssh; grep -qF '" + $pubKeyContent + "' " + $tunnelHome + "/.ssh/authorized_keys 2>/dev/null || echo '" + $pubKeyContent + "' >> " + $tunnelHome + "/.ssh/authorized_keys; chmod 600 " + $tunnelHome + "/.ssh/authorized_keys; chown -R " + $VPS_USER + ":" + $VPS_USER + " " + $tunnelHome + "/.ssh"
+ssh -p $VPS_SSH_PORT $uploadTarget $sshCmd
 
 if ($LASTEXITCODE -eq 0) {
     Write-Host "  Public key uploaded." -ForegroundColor Green
@@ -123,63 +124,77 @@ if ($LASTEXITCODE -eq 0) {
 else {
     Write-Host "  Upload failed. Manually copy the key below to VPS:" -ForegroundColor Red
     Write-Host ("  " + $pubKeyContent) -ForegroundColor White
-    Write-Host ("  Add to /home/" + $VPS_USER + "/.ssh/authorized_keys") -ForegroundColor White
+    Write-Host ("  Add to /home/" + $VPS_USER + "/.ssh/authorized_keys (via root)") -ForegroundColor White
 }
 
 # ---------- 5. Add iPhone public key to admin authorized_keys ----------
 Write-Host ""
 Write-Host "[5/6] Configure iPhone SSH public key..." -ForegroundColor Yellow
-Write-Host "  Do you want to add an iPhone public key for SSH access to this PC? (y/N)" -ForegroundColor White
+Write-Host "  Enter 'y' or paste the public key directly (N to skip):" -ForegroundColor White
+# Disable bracketed paste mode so pasted text won't show ^[[200~ in terminal
+[Console]::Write("$([char]27)[?2004l")
 $addIphoneKey = Read-Host "  "
+[Console]::Write("$([char]27)[?2004h")
+# Strip any remaining escape sequences as fallback
+$addIphoneKey = $addIphoneKey -replace '\x1b\[\d*~', '' -replace '\x1b\[[\d;]*[A-Za-z]', ''
+$addIphoneKey = $addIphoneKey.Trim()
 
-if ($addIphoneKey -eq 'y' -or $addIphoneKey -eq 'Y') {
+# If user pasted the key directly, use it; if 'y', ask for it next
+$iphonePubKey = $null
+if ($addIphoneKey -match '^ssh-(ed25519|rsa|ecdsa)\s+\S+') {
+    $iphonePubKey = $addIphoneKey
+}
+elseif ($addIphoneKey -eq 'y' -or $addIphoneKey -eq 'Y') {
     Write-Host "  Paste the iPhone public key below (one line, e.g. ssh-ed25519 AAAA... or ssh-rsa AAAA...):" -ForegroundColor White
+    [Console]::Write("$([char]27)[?2004l")
     $iphonePubKey = Read-Host "  "
+    [Console]::Write("$([char]27)[?2004h")
+    $iphonePubKey = $iphonePubKey -replace '\x1b\[\d*~', '' -replace '\x1b\[[\d;]*[A-Za-z]', ''
     $iphonePubKey = $iphonePubKey.Trim()
+}
 
-    if ($iphonePubKey -match '^ssh-(ed25519|rsa|ecdsa)\s+\S+') {
-        $adminAuthKeysFile = "C:\ProgramData\ssh\administrators_authorized_keys"
-        $sshProgramData = "C:\ProgramData\ssh"
+if ($iphonePubKey -and $iphonePubKey -match '^ssh-(ed25519|rsa|ecdsa)\s+\S+') {
+    $adminAuthKeysFile = "C:\ProgramData\ssh\administrators_authorized_keys"
+    $sshProgramData = "C:\ProgramData\ssh"
 
-        # Ensure directory exists
-        if (-not (Test-Path $sshProgramData)) {
-            New-Item -ItemType Directory -Path $sshProgramData -Force | Out-Null
+    # Ensure directory exists
+    if (-not (Test-Path $sshProgramData)) {
+        New-Item -ItemType Directory -Path $sshProgramData -Force | Out-Null
+    }
+
+    # Check if key already exists
+    $keyExists = $false
+    if (Test-Path $adminAuthKeysFile) {
+        $existingKeys = Get-Content $adminAuthKeysFile -ErrorAction SilentlyContinue
+        if ($existingKeys -contains $iphonePubKey) {
+            $keyExists = $true
         }
+    }
 
-        # Check if key already exists
-        $keyExists = $false
-        if (Test-Path $adminAuthKeysFile) {
-            $existingKeys = Get-Content $adminAuthKeysFile -ErrorAction SilentlyContinue
-            if ($existingKeys -contains $iphonePubKey) {
-                $keyExists = $true
-            }
-        }
-
-        if ($keyExists) {
-            Write-Host "  iPhone public key already exists in administrators_authorized_keys." -ForegroundColor Green
-        }
-        else {
-            # Append the key
-            Add-Content -Path $adminAuthKeysFile -Value $iphonePubKey -Encoding UTF8
-            Write-Host "  iPhone public key added to $adminAuthKeysFile" -ForegroundColor Green
-        }
-
-        # Fix ACL: only SYSTEM and Administrators should have access
-        $acl = New-Object System.Security.AccessControl.FileSecurity
-        $acl.SetAccessRuleProtection($true, $false)  # Disable inheritance
-        $adminRule = New-Object System.Security.AccessControl.FileSystemAccessRule(
-            "BUILTIN\Administrators", "FullControl", "Allow")
-        $systemRule = New-Object System.Security.AccessControl.FileSystemAccessRule(
-            "NT AUTHORITY\SYSTEM", "FullControl", "Allow")
-        $acl.AddAccessRule($adminRule)
-        $acl.AddAccessRule($systemRule)
-        Set-Acl -Path $adminAuthKeysFile -AclObject $acl
-        Write-Host "  ACL permissions set (SYSTEM + Administrators only)." -ForegroundColor Green
+    if ($keyExists) {
+        Write-Host "  iPhone public key already exists in administrators_authorized_keys." -ForegroundColor Green
     }
     else {
-        Write-Host "  Invalid public key format. Skipping." -ForegroundColor Red
-        Write-Host "  Expected format: ssh-ed25519 AAAA... or ssh-rsa AAAA..." -ForegroundColor Yellow
+        # Append the key
+        Add-Content -Path $adminAuthKeysFile -Value $iphonePubKey -Encoding UTF8
+        Write-Host "  iPhone public key added to $adminAuthKeysFile" -ForegroundColor Green
     }
+
+    # Fix ACL: only SYSTEM and Administrators should have access
+    $acl = New-Object System.Security.AccessControl.FileSecurity
+    $acl.SetAccessRuleProtection($true, $false)  # Disable inheritance
+    $adminRule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+        "BUILTIN\Administrators", "FullControl", "Allow")
+    $systemRule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+        "NT AUTHORITY\SYSTEM", "FullControl", "Allow")
+    $acl.AddAccessRule($adminRule)
+    $acl.AddAccessRule($systemRule)
+    Set-Acl -Path $adminAuthKeysFile -AclObject $acl
+    Write-Host "  ACL permissions set (SYSTEM + Administrators only)." -ForegroundColor Green
+}
+elseif ($addIphoneKey -eq 'y' -or $addIphoneKey -eq 'Y') {
+    Write-Host "  Invalid public key format. Skipping." -ForegroundColor Red
+    Write-Host "  Expected format: ssh-ed25519 AAAA... or ssh-rsa AAAA..." -ForegroundColor Yellow
 }
 else {
     Write-Host "  Skipped iPhone public key configuration." -ForegroundColor Gray
@@ -195,7 +210,8 @@ Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host " Windows Setup Complete!" -ForegroundColor Cyan
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host ""
-$testCmd = "  ssh -i " + $keyPath + " -N -R " + $REMOTE_PORT + ":localhost:" + $LOCAL_PORT + " -p " + $VPS_SSH_PORT + " " + $sshTarget
+$tunnelTarget = $VPS_USER + '@' + $VPS_IP
+$testCmd = "  ssh -i " + $keyPath + " -N -R " + $REMOTE_PORT + ":localhost:" + $LOCAL_PORT + " -p " + $VPS_SSH_PORT + " " + $tunnelTarget
 Write-Host "Manual test command:" -ForegroundColor White
 Write-Host $testCmd -ForegroundColor White
 Write-Host ""
