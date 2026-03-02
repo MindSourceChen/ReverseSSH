@@ -70,9 +70,9 @@ else
     echo "  User $TUNNEL_USER created."
 fi
 
-# Set password (can switch to key-only later)
-echo "  Please set password for $TUNNEL_USER:"
-sudo passwd "$TUNNEL_USER"
+# Default hardening: disable password login for tunnel user
+sudo passwd -l "$TUNNEL_USER" >/dev/null 2>&1 || true
+echo "  Password login locked for $TUNNEL_USER (key-only)."
 
 # ---------- 3. Configure SSH key directory ----------
 echo "[3/6] Configuring SSH key directory..."
@@ -95,44 +95,59 @@ if [ ! -f "${SSHD_CONFIG}.bak" ]; then
     echo "  Original config backed up to ${SSHD_CONFIG}.bak"
 fi
 
-# Append or fix reverse tunnel config
-MARKER="# === REVERSE-SSH-TUNNEL CONFIG ==="
-NEED_RESTART=0
-
-if ! grep -q "$MARKER" "$SSHD_CONFIG"; then
-    sudo tee -a "$SSHD_CONFIG" > /dev/null <<EOF
-
-$MARKER
-# Allow remote port forwarding (core reverse tunnel setting)
-GatewayPorts yes
-# Keep connections alive to prevent tunnel disconnect
-ClientAliveInterval 30
-ClientAliveCountMax 3
-# Allow TCP forwarding
-AllowTcpForwarding yes
-EOF
-    echo "  SSH config added."
-    NEED_RESTART=1
-else
-    echo "  SSH config already contains tunnel settings, checking..."
-    # Ensure GatewayPorts is yes (fix clientspecified or no)
-    if grep -q "GatewayPorts clientspecified\|GatewayPorts no" "$SSHD_CONFIG"; then
-        sudo sed -i 's/GatewayPorts clientspecified/GatewayPorts yes/' "$SSHD_CONFIG"
-        sudo sed -i 's/GatewayPorts no/GatewayPorts yes/' "$SSHD_CONFIG"
-        echo "  [FIX] GatewayPorts corrected to yes"
-        NEED_RESTART=1
+ensure_sshd_option() {
+    key="$1"
+    value="$2"
+    if sudo grep -Eq "^[[:space:]]*#?[[:space:]]*$key[[:space:]]+" "$SSHD_CONFIG"; then
+        sudo sed -i -E "s|^[[:space:]]*#?[[:space:]]*$key[[:space:]].*|$key $value|g" "$SSHD_CONFIG"
     else
-        echo "  GatewayPorts yes - OK"
+        echo "$key $value" | sudo tee -a "$SSHD_CONFIG" >/dev/null
     fi
-    # Ensure AllowTcpForwarding is yes
-    if grep -q "AllowTcpForwarding no" "$SSHD_CONFIG"; then
-        sudo sed -i 's/AllowTcpForwarding no/AllowTcpForwarding yes/' "$SSHD_CONFIG"
-        echo "  [FIX] AllowTcpForwarding corrected to yes"
-        NEED_RESTART=1
-    else
-        echo "  AllowTcpForwarding yes - OK"
-    fi
+}
+
+# Keep secure global defaults and only allow forwarding for tunnel user.
+ensure_sshd_option "ClientAliveInterval" "30"
+ensure_sshd_option "ClientAliveCountMax" "3"
+ensure_sshd_option "PubkeyAuthentication" "yes"
+ensure_sshd_option "GatewayPorts" "no"
+ensure_sshd_option "AllowTcpForwarding" "no"
+
+# Clean up legacy tunnel-user block if it exists.
+if sudo grep -q "# === TUNNEL USER RESTRICTION ===" "$SSHD_CONFIG"; then
+    sudo sed -i '/# === TUNNEL USER RESTRICTION ===/,/ForceCommand \/bin\/false/d' "$SSHD_CONFIG"
 fi
+
+MATCH_START="# === REVERSE-SSH-TUNNEL USER POLICY START ==="
+MATCH_END="# === REVERSE-SSH-TUNNEL USER POLICY END ==="
+TMP_FILE=$(mktemp)
+
+sudo awk -v start="$MATCH_START" -v end="$MATCH_END" '
+    $0 == start { skip = 1; next }
+    $0 == end { skip = 0; next }
+    !skip { print }
+' "$SSHD_CONFIG" > "$TMP_FILE"
+
+cat >> "$TMP_FILE" <<EOF
+
+$MATCH_START
+Match User $TUNNEL_USER
+    PubkeyAuthentication yes
+    PasswordAuthentication no
+    KbdInteractiveAuthentication no
+    AuthenticationMethods publickey
+    AllowTcpForwarding remote
+    GatewayPorts yes
+    X11Forwarding no
+    PermitTunnel no
+    AllowAgentForwarding no
+    PermitTTY no
+    ForceCommand /bin/false
+$MATCH_END
+EOF
+
+sudo cp "$TMP_FILE" "$SSHD_CONFIG"
+rm -f "$TMP_FILE"
+echo "  SSH config hardened (forwarding restricted to user $TUNNEL_USER)."
 
 # ---------- 5. Configure firewall ----------
 echo "[5/6] Configuring firewall rules..."
@@ -181,8 +196,9 @@ echo ""
 echo "Next steps:"
 echo "  1. After generating keys on Windows, add the public key to:"
 echo "     $TUNNEL_HOME/.ssh/authorized_keys"
+echo "  2. Tunnel user is key-only by default (password login disabled)."
 echo ""
-echo "  2. PC-Port mapping:"
+echo "  3. PC-Port mapping:"
 for entry in "${TUNNEL_PORTS[@]}"; do
     PC_NAME="${entry%%:*}"
     PC_PORT="${entry##*:}"

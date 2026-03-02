@@ -113,10 +113,10 @@ function Show-Status {
     if (Test-Path $sshdConfig) {
         $match = Select-String -Path $sshdConfig -Pattern '^\s*PasswordAuthentication\s+(yes|no)' | Select-Object -First 1
         if ($match -and $match.Line -match "no") {
-            Write-Host "  Password Auth  : Disabled" -ForegroundColor Yellow
+            Write-Host "  Password Auth  : Disabled" -ForegroundColor Green
         }
         else {
-            Write-Host "  Password Auth  : Enabled" -ForegroundColor Green
+            Write-Host "  Password Auth  : Enabled" -ForegroundColor Yellow
         }
     }
 
@@ -142,19 +142,27 @@ function Show-VPSGuide {
     Write-Host "  2. SSH to VPS (select [5]), then run:" -ForegroundColor White
     Write-Host "       cd /root/reverse-ssh" -ForegroundColor Green
     Write-Host "       sudo ./vps-setup.sh" -ForegroundColor Green
-    Write-Host "       sudo ./vps-security.sh  # optional" -ForegroundColor Green
+    Write-Host "       sudo ./vps-security.sh  # optional (fail2ban)" -ForegroundColor Green
     Write-Host ""
     Write-Host "  Option B: Manual setup" -ForegroundColor Cyan
     Write-Host "  -----------------------------------------" -ForegroundColor DarkGray
     Write-Host "  1. Create tunnel user:" -ForegroundColor White
     Write-Host "       sudo useradd -m -s /bin/bash tunnel" -ForegroundColor Green
-    Write-Host "       sudo passwd tunnel" -ForegroundColor Green
+    Write-Host "       sudo passwd -l tunnel" -ForegroundColor Green
     Write-Host ""
-    Write-Host "  2. Edit /etc/ssh/sshd_config, add:" -ForegroundColor White
-    Write-Host "       GatewayPorts yes" -ForegroundColor Green
+    Write-Host "  2. Edit /etc/ssh/sshd_config, set global defaults:" -ForegroundColor White
+    Write-Host "       GatewayPorts no" -ForegroundColor Green
     Write-Host "       ClientAliveInterval 30" -ForegroundColor Green
     Write-Host "       ClientAliveCountMax 3" -ForegroundColor Green
-    Write-Host "       AllowTcpForwarding yes" -ForegroundColor Green
+    Write-Host "       AllowTcpForwarding no" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "     Add tunnel-user policy:" -ForegroundColor White
+    Write-Host "       Match User tunnel" -ForegroundColor Green
+    Write-Host "           AuthenticationMethods publickey" -ForegroundColor Green
+    Write-Host "           PasswordAuthentication no" -ForegroundColor Green
+    Write-Host "           AllowTcpForwarding remote" -ForegroundColor Green
+    Write-Host "           GatewayPorts yes" -ForegroundColor Green
+    Write-Host "           ForceCommand /bin/false" -ForegroundColor Green
     Write-Host ""
     Write-Host "  3. Restart SSH:" -ForegroundColor White
     Write-Host "       sudo systemctl restart ssh" -ForegroundColor Green
@@ -169,8 +177,8 @@ function Show-VPSGuide {
         Write-Host ("       sudo ufw allow " + $script:REMOTE_PORT + "/tcp") -ForegroundColor Green
     }
     Write-Host ""
-    Write-Host "  IMPORTANT: GatewayPorts must be 'yes' (not 'clientspecified')" -ForegroundColor Red
-    Write-Host "  Verify: grep GatewayPorts /etc/ssh/sshd_config" -ForegroundColor DarkGray
+    Write-Host "  IMPORTANT: keep GatewayPorts yes only inside Match User tunnel." -ForegroundColor Red
+    Write-Host "  Verify: sshd -T | grep -E 'gatewayports|allowtcpforwarding'" -ForegroundColor DarkGray
     Write-Host ""
 }
 
@@ -191,7 +199,7 @@ while ($true) {
         Write-Host "  [1] Start tunnel" -ForegroundColor White
     }
     Write-Host "  [2] Restart tunnel" -ForegroundColor White
-    Write-Host "  [3] Toggle password auth" -ForegroundColor White
+    Write-Host "  [3] Toggle password auth (temporary use only)" -ForegroundColor White
     Write-Host "  [4] Initial setup (first time)" -ForegroundColor White
     Write-Host "  [5] SSH to VPS" -ForegroundColor White
     Write-Host "  [6] Sync VPS scripts" -ForegroundColor White

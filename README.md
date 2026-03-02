@@ -46,7 +46,7 @@ Each PC auto-registers in the config when running `sync-to-vps.ps1`. Ports are a
 | `tunnel.ps1` | Windows | **One-click management script (PC entry point)** |
 | `sync-to-vps.ps1` | Windows | Sync scripts to VPS (auto-registers PC port) |
 | `vps-setup.sh` | Ubuntu VPS | VPS base configuration script |
-| `vps-security.sh` | Ubuntu VPS | VPS security hardening (optional) |
+| `vps-security.sh` | Ubuntu VPS | Additional hardening (fail2ban, optional) |
 | `vps-config.json` | Shared | PC-Port mapping and VPS connection info |
 
 <details>
@@ -86,12 +86,12 @@ Interactive menu:
   SSH Tunnel     : Running (PID: 12345)
   Keepalive      : Running (PID: 6789)
   OpenSSH Server : Running
-  Password Auth  : Enabled
+  Password Auth  : Disabled
 
   ---- Actions ----
   [1] Stop tunnel
   [2] Restart tunnel
-  [3] Toggle password auth
+  [3] Toggle password auth (temporary use only)
   [4] Initial setup (first time)
   [5] SSH to VPS
   [6] Sync VPS scripts
@@ -102,9 +102,9 @@ Interactive menu:
 ### First-Time Deployment
 
 1. **Sync scripts to VPS** — Run `.\sync-to-vps.ps1` (auto-registers this PC and assigns a port)
-2. **Configure VPS** — SSH to VPS and run `sudo ./vps-setup.sh` (opens firewall ports for all PCs)
+2. **Configure VPS** — SSH to VPS and run `sudo ./vps-setup.sh` (opens firewall ports + applies key-only tunnel hardening)
 3. **Run initial setup** — Select `[4]`: installs OpenSSH, generates keys, uploads pubkey, creates scheduled task
-4. **Configure iPhone** — In Termius, connect to `VPS_IP:<your_port>` with your Windows username and password
+4. **Configure iPhone** — In Termius, connect to `VPS_IP:<your_port>` using SSH key authentication
 
 ### Adding a New PC
 
@@ -180,11 +180,11 @@ Start-Service sshd
 
 ## Security Recommendations
 
-1. **Use key-based auth**: All SSH connections should use keys instead of passwords
-2. **Keep systems updated**: Regularly update both VPS and Windows
-3. **Least privilege**: The `tunnel` user should only be used for tunneling
+1. **Default is key-only**: Windows OpenSSH is configured with `PasswordAuthentication no` during setup
+2. **Tunnel user is restricted by default**: `tunnel` is key-only and limited to reverse forwarding
+3. **Keep systems updated**: Regularly update both VPS and Windows
 4. **Monitor logs**: Regularly check `tunnel.log` and `/var/log/auth.log` on VPS
-5. **Non-standard ports**: Use a non-standard SSH port on VPS to reduce scanning
+5. **Optional extra hardening**: run `vps-security.sh` to enable fail2ban
 
 ## Uninstall
 

@@ -99,6 +99,32 @@ else {
     Write-Host "  Default SSH shell already set to PowerShell."
 }
 
+# Default to key-based login for Windows OpenSSH
+$sshdConfigPath = "C:\ProgramData\ssh\sshd_config"
+if (Test-Path $sshdConfigPath) {
+    $sshdContent = Get-Content $sshdConfigPath -Raw
+    if ($sshdContent -match '(?m)^#?\s*PasswordAuthentication\s+(yes|no)') {
+        $sshdContent = $sshdContent -replace '(?m)^#?\s*PasswordAuthentication\s+(yes|no)', 'PasswordAuthentication no'
+    }
+    else {
+        $sshdContent += "`r`nPasswordAuthentication no"
+    }
+
+    if ($sshdContent -match '(?m)^#?\s*PubkeyAuthentication\s+(yes|no)') {
+        $sshdContent = $sshdContent -replace '(?m)^#?\s*PubkeyAuthentication\s+(yes|no)', 'PubkeyAuthentication yes'
+    }
+    else {
+        $sshdContent += "`r`nPubkeyAuthentication yes"
+    }
+
+    Set-Content -Path $sshdConfigPath -Value $sshdContent -NoNewline
+    Restart-Service sshd -ErrorAction SilentlyContinue
+    Write-Host "  OpenSSH auth defaulted to key-based login." -ForegroundColor Green
+}
+else {
+    Write-Host "  WARN: sshd_config not found, skip key-based auth defaults." -ForegroundColor Yellow
+}
+
 # ---------- 3. Generate SSH key pair ----------
 Write-Host ""
 Write-Host "[3/6] Generating SSH key pair..." -ForegroundColor Yellow

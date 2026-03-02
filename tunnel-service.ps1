@@ -97,10 +97,10 @@ function Show-Status {
     if (Test-Path $sshdConfig) {
         $match = Select-String -Path $sshdConfig -Pattern '^\s*PasswordAuthentication\s+(yes|no)' | Select-Object -First 1
         if ($match -and $match.Line -match "no") {
-            Write-Host "  Password Auth  : Disabled" -ForegroundColor Yellow
+            Write-Host "  Password Auth  : Disabled" -ForegroundColor Green
         }
         else {
-            Write-Host "  Password Auth  : Enabled" -ForegroundColor Green
+            Write-Host "  Password Auth  : Enabled" -ForegroundColor Yellow
         }
     }
 
