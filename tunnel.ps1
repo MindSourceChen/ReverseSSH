@@ -46,14 +46,16 @@ function Show-Status {
         if ($script:PC_PORTS.Count -gt 1) {
             Write-Host ("  Total PCs      : " + $script:PC_PORTS.Count) -ForegroundColor DarkGray
         }
-    } else {
+    }
+    else {
         Write-Host "  VPS            : Not Configured" -ForegroundColor Red
     }
 
     # SSH Key
     if (Test-Path $KeyPath) {
         Write-Host "  Tunnel Key     : OK" -ForegroundColor Green
-    } else {
+    }
+    else {
         Write-Host "  Tunnel Key     : Not Generated" -ForegroundColor Red
     }
 
@@ -63,10 +65,12 @@ function Show-Status {
         $state = $task.State
         if ($state -eq "Running") {
             Write-Host ("  Scheduled Task : " + $state) -ForegroundColor Green
-        } else {
+        }
+        else {
             Write-Host ("  Scheduled Task : " + $state) -ForegroundColor Yellow
         }
-    } else {
+    }
+    else {
         Write-Host "  Scheduled Task : Not Installed" -ForegroundColor Red
     }
 
@@ -76,7 +80,8 @@ function Show-Status {
         foreach ($p in $sshProc) {
             Write-Host ("  SSH Tunnel     : Running (PID: " + $p.Id + ")") -ForegroundColor Green
         }
-    } else {
+    }
+    else {
         Write-Host "  SSH Tunnel     : Not Running" -ForegroundColor Red
     }
 
@@ -84,7 +89,8 @@ function Show-Status {
     $keepaliveProc = Get-WmiObject Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -and $_.CommandLine -like "*tunnel-keepalive*" }
     if ($keepaliveProc) {
         Write-Host ("  Keepalive      : Running (PID: " + $keepaliveProc.ProcessId + ")") -ForegroundColor Green
-    } else {
+    }
+    else {
         Write-Host "  Keepalive      : Not Running" -ForegroundColor Red
     }
 
@@ -93,10 +99,12 @@ function Show-Status {
     if ($sshdSvc) {
         if ($sshdSvc.Status -eq "Running") {
             Write-Host ("  OpenSSH Server : " + $sshdSvc.Status) -ForegroundColor Green
-        } else {
+        }
+        else {
             Write-Host ("  OpenSSH Server : " + $sshdSvc.Status) -ForegroundColor Yellow
         }
-    } else {
+    }
+    else {
         Write-Host "  OpenSSH Server : Not Installed" -ForegroundColor Red
     }
 
@@ -106,7 +114,8 @@ function Show-Status {
         $match = Select-String -Path $sshdConfig -Pattern '^\s*PasswordAuthentication\s+(yes|no)' | Select-Object -First 1
         if ($match -and $match.Line -match "no") {
             Write-Host "  Password Auth  : Disabled" -ForegroundColor Yellow
-        } else {
+        }
+        else {
             Write-Host "  Password Auth  : Enabled" -ForegroundColor Green
         }
     }
@@ -155,7 +164,8 @@ function Show-VPSGuide {
         foreach ($key in ($script:PC_PORTS.Keys | Sort-Object)) {
             Write-Host ("       sudo ufw allow " + $script:PC_PORTS[$key] + "/tcp  # " + $key) -ForegroundColor Green
         }
-    } else {
+    }
+    else {
         Write-Host ("       sudo ufw allow " + $script:REMOTE_PORT + "/tcp") -ForegroundColor Green
     }
     Write-Host ""
@@ -176,7 +186,8 @@ while ($true) {
     Write-Host "  ---- Actions ----" -ForegroundColor Yellow
     if ($isRunning) {
         Write-Host "  [1] Stop tunnel" -ForegroundColor White
-    } else {
+    }
+    else {
         Write-Host "  [1] Start tunnel" -ForegroundColor White
     }
     Write-Host "  [2] Restart tunnel" -ForegroundColor White
@@ -193,14 +204,13 @@ while ($true) {
         "1" {
             if ($isRunning) {
                 & (Join-Path $ScriptDir "tunnel-service.ps1") -Action stop
-            } else {
+            }
+            else {
                 & (Join-Path $ScriptDir "tunnel-service.ps1") -Action start
             }
-            Start-Sleep -Seconds 1
         }
         "2" {
             & (Join-Path $ScriptDir "tunnel-service.ps1") -Action restart
-            Start-Sleep -Seconds 1
         }
         "3" {
             & (Join-Path $ScriptDir "win-password-auth.ps1")

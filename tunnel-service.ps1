@@ -49,10 +49,12 @@ function Show-Status {
         $state = $task.State
         if ($state -eq "Running") {
             Write-Host ("  Scheduled Task : " + $state) -ForegroundColor Green
-        } else {
+        }
+        else {
             Write-Host ("  Scheduled Task : " + $state) -ForegroundColor Yellow
         }
-    } else {
+    }
+    else {
         Write-Host "  Scheduled Task : Not Installed" -ForegroundColor Red
     }
 
@@ -62,7 +64,8 @@ function Show-Status {
         foreach ($p in $sshProc) {
             Write-Host ("  SSH Process    : Running (PID: " + $p.Id + ")") -ForegroundColor Green
         }
-    } else {
+    }
+    else {
         Write-Host "  SSH Process    : Not Running" -ForegroundColor Red
     }
 
@@ -70,7 +73,8 @@ function Show-Status {
     $keepaliveProc = Get-WmiObject Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -and $_.CommandLine -like "*tunnel-keepalive*" }
     if ($keepaliveProc) {
         Write-Host ("  Keepalive Script: Running (PID: " + $keepaliveProc.ProcessId + ")") -ForegroundColor Green
-    } else {
+    }
+    else {
         Write-Host "  Keepalive Script: Not Running" -ForegroundColor Red
     }
 
@@ -79,10 +83,12 @@ function Show-Status {
     if ($sshdSvc) {
         if ($sshdSvc.Status -eq "Running") {
             Write-Host ("  OpenSSH Server : " + $sshdSvc.Status) -ForegroundColor Green
-        } else {
+        }
+        else {
             Write-Host ("  OpenSSH Server : " + $sshdSvc.Status) -ForegroundColor Yellow
         }
-    } else {
+    }
+    else {
         Write-Host "  OpenSSH Server : Not Installed" -ForegroundColor Red
     }
 
@@ -92,7 +98,8 @@ function Show-Status {
         $match = Select-String -Path $sshdConfig -Pattern '^\s*PasswordAuthentication\s+(yes|no)' | Select-Object -First 1
         if ($match -and $match.Line -match "no") {
             Write-Host "  Password Auth  : Disabled" -ForegroundColor Yellow
-        } else {
+        }
+        else {
             Write-Host "  Password Auth  : Enabled" -ForegroundColor Green
         }
     }
@@ -108,6 +115,40 @@ function Show-Status {
     Write-Host ""
 }
 
+function Stop-KeepaliveProcesses {
+    # Kill all PowerShell processes running tunnel-keepalive script
+    $keepaliveProcs = Get-WmiObject Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.CommandLine -and $_.CommandLine -like "*tunnel-keepalive*" }
+    if ($keepaliveProcs) {
+        foreach ($proc in @($keepaliveProcs)) {
+            try {
+                Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
+                Write-Host ("  Killed keepalive process (PID: " + $proc.ProcessId + ")") -ForegroundColor Yellow
+            }
+            catch { }
+        }
+    }
+}
+
+function Stop-AllSSHProcesses {
+    # Kill all ssh processes and verify they are dead
+    Get-Process -Name "ssh" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    # Also kill by WMI as fallback (covers processes not found by name)
+    $sshProcs = Get-WmiObject Win32_Process -Filter "Name='ssh.exe'" -ErrorAction SilentlyContinue
+    if ($sshProcs) {
+        foreach ($proc in @($sshProcs)) {
+            try { Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue } catch { }
+        }
+    }
+    # Verify ssh is dead (retry up to 3 times)
+    for ($i = 0; $i -lt 3; $i++) {
+        Start-Sleep -Milliseconds 500
+        $remaining = Get-Process -Name "ssh" -ErrorAction SilentlyContinue
+        if (-not $remaining) { return }
+        $remaining | Stop-Process -Force -ErrorAction SilentlyContinue
+    }
+}
+
 if ($Action -eq "status") {
     Show-Status
 
@@ -118,7 +159,8 @@ if ($Action -eq "status") {
     if ($isRunning) {
         Write-Host "  [1] Stop tunnel" -ForegroundColor White
         Write-Host "  [2] Restart tunnel" -ForegroundColor White
-    } else {
+    }
+    else {
         Write-Host "  [1] Start tunnel" -ForegroundColor White
         Write-Host "  [2] Restart tunnel" -ForegroundColor White
     }
@@ -137,9 +179,11 @@ if ($Action -eq "status") {
 
     if ($choice -eq "1") {
         if ($isRunning) { $Action = "stop" } else { $Action = "start" }
-    } elseif ($choice -eq "2") {
+    }
+    elseif ($choice -eq "2") {
         $Action = "restart"
-    } else {
+    }
+    else {
         exit 0
     }
 }
@@ -150,12 +194,12 @@ if ($Action -eq "start") {
         Write-Host "ERROR: Task not installed. Run install-tunnel-service.ps1 first." -ForegroundColor Red
         exit 1
     }
-    # Kill existing ssh to let keepalive script restart cleanly
-    Get-Process -Name "ssh" -ErrorAction SilentlyContinue | Stop-Process -Force
+    # Kill lingering keepalive/ssh to prevent duplicate processes
+    Stop-KeepaliveProcesses
+    Stop-AllSSHProcesses
     Start-ScheduledTask -TaskName $TaskName
     Start-Sleep -Seconds 2
     Write-Host "Tunnel service started." -ForegroundColor Green
-    Show-Status
 }
 
 if ($Action -eq "stop") {
@@ -164,11 +208,11 @@ if ($Action -eq "stop") {
     if ($task -and $task.State -eq "Running") {
         Stop-ScheduledTask -TaskName $TaskName
     }
-    # Kill ssh processes
-    Get-Process -Name "ssh" -ErrorAction SilentlyContinue | Stop-Process -Force
-    Start-Sleep -Seconds 1
+    # Kill keepalive script processes (must be before ssh kill, otherwise keepalive respawns ssh)
+    Stop-KeepaliveProcesses
+    # Kill ssh processes with verification
+    Stop-AllSSHProcesses
     Write-Host "Tunnel service stopped." -ForegroundColor Green
-    Show-Status
 }
 
 if ($Action -eq "restart") {
@@ -177,8 +221,8 @@ if ($Action -eq "restart") {
     if ($task -and $task.State -eq "Running") {
         Stop-ScheduledTask -TaskName $TaskName
     }
-    Get-Process -Name "ssh" -ErrorAction SilentlyContinue | Stop-Process -Force
-    Start-Sleep -Seconds 1
+    Stop-KeepaliveProcesses
+    Stop-AllSSHProcesses
     # Start
     if (-not $task) {
         Write-Host "ERROR: Task not installed. Run install-tunnel-service.ps1 first." -ForegroundColor Red
@@ -187,5 +231,4 @@ if ($Action -eq "restart") {
     Start-ScheduledTask -TaskName $TaskName
     Start-Sleep -Seconds 2
     Write-Host "Tunnel service restarted." -ForegroundColor Green
-    Show-Status
 }
